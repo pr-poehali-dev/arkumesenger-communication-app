@@ -1,6 +1,26 @@
 import { useState, useRef, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 
+const AUTH_URL = "https://functions.poehali.dev/34adf976-fb61-4583-b3cd-d3f96a5bd7d2";
+
+async function authApi(action: string, data: Record<string, string>) {
+  const res = await fetch(AUTH_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, ...data }),
+  });
+  return res.json();
+}
+
+interface User {
+  id: number;
+  name: string;
+  username: string;
+  phone?: string;
+  avatar_color: string;
+  created_at: string;
+}
+
 type Screen = "login" | "register" | "chats" | "chat" | "contacts" | "profile" | "search" | "settings";
 
 interface Message {
@@ -80,10 +100,23 @@ const Avatar = ({ letter, color, size = 44, online }: { letter: string; color: s
   </div>
 );
 
-function LoginScreen({ onLogin, onRegister }: { onLogin: () => void; onRegister: () => void }) {
-  const [phone, setPhone] = useState("");
+function LoginScreen({ onLogin, onRegister }: { onLogin: (user: User, token: string) => void; onRegister: () => void }) {
+  const [login, setLogin] = useState("");
   const [pass, setPass] = useState("");
   const [showPass, setShowPass] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleLogin = async () => {
+    setError("");
+    if (!login.trim() || !pass.trim()) { setError("Заполните все поля"); return; }
+    setLoading(true);
+    const res = await authApi("login", { login: login.trim(), password: pass });
+    setLoading(false);
+    if (res.error) { setError(res.error); return; }
+    localStorage.setItem("arku_token", res.token);
+    onLogin(res.user, res.token);
+  };
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 relative overflow-hidden" style={{ background:"#0A0A0F" }}>
@@ -99,20 +132,21 @@ function LoginScreen({ onLogin, onRegister }: { onLogin: () => void; onRegister:
 
         <div className="rounded-2xl p-6 space-y-4" style={{ background:"#111118",border:"1px solid rgba(139,92,246,0.2)" }}>
           <div>
-            <label className="text-xs font-medium mb-1.5 block" style={{ color:"#9CA3AF" }}>Номер телефона или email</label>
-            <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+7 (___) ___-__-__" className="w-full px-4 py-3 rounded-xl outline-none text-white font-golos" style={{ background:"#18181F",border:"1px solid rgba(139,92,246,0.2)",color:"#fff" }} />
+            <label className="text-xs font-medium mb-1.5 block" style={{ color:"#9CA3AF" }}>Имя пользователя или телефон</label>
+            <input value={login} onChange={e=>setLogin(e.target.value)} placeholder="@username или +7..." className="w-full px-4 py-3 rounded-xl outline-none text-white font-golos" style={{ background:"#18181F",border:"1px solid rgba(139,92,246,0.2)",color:"#fff" }} onKeyDown={e=>e.key==="Enter"&&handleLogin()} />
           </div>
           <div>
             <label className="text-xs font-medium mb-1.5 block" style={{ color:"#9CA3AF" }}>Пароль</label>
             <div className="relative">
-              <input type={showPass?"text":"password"} value={pass} onChange={e=>setPass(e.target.value)} placeholder="Введите пароль" className="w-full px-4 py-3 rounded-xl outline-none text-white font-golos" style={{ background:"#18181F",border:"1px solid rgba(139,92,246,0.2)",color:"#fff" }} />
+              <input type={showPass?"text":"password"} value={pass} onChange={e=>setPass(e.target.value)} placeholder="Введите пароль" className="w-full px-4 py-3 rounded-xl outline-none text-white font-golos" style={{ background:"#18181F",border:"1px solid rgba(139,92,246,0.2)",color:"#fff" }} onKeyDown={e=>e.key==="Enter"&&handleLogin()} />
               <button className="absolute right-3 top-1/2 -translate-y-1/2" onClick={()=>setShowPass(!showPass)} style={{ color:"#6B7280" }}>
                 <Icon name={showPass?"EyeOff":"Eye"} size={18} />
               </button>
             </div>
           </div>
-          <button onClick={onLogin} className="w-full py-3.5 rounded-xl font-montserrat font-bold text-white text-sm transition-all duration-300 hover:scale-[1.02]" style={{ background:"linear-gradient(135deg,#7C3AED,#D946EF)",boxShadow:"0 0 20px rgba(124,58,237,0.4)" }}>
-            Войти
+          {error && <p className="text-xs rounded-lg px-3 py-2" style={{ background:"rgba(239,68,68,0.1)",color:"#F87171",border:"1px solid rgba(239,68,68,0.2)" }}>{error}</p>}
+          <button onClick={handleLogin} disabled={loading} className="w-full py-3.5 rounded-xl font-montserrat font-bold text-white text-sm transition-all duration-300 hover:scale-[1.02] disabled:opacity-60" style={{ background:"linear-gradient(135deg,#7C3AED,#D946EF)",boxShadow:"0 0 20px rgba(124,58,237,0.4)" }}>
+            {loading ? "Входим..." : "Войти"}
           </button>
         </div>
 
@@ -135,14 +169,36 @@ function LoginScreen({ onLogin, onRegister }: { onLogin: () => void; onRegister:
   );
 }
 
-function RegisterScreen({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
+function RegisterScreen({ onBack, onDone }: { onBack: () => void; onDone: (user: User, token: string) => void }) {
   const [step, setStep] = useState(1);
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [phone, setPhone] = useState("");
   const [pass, setPass] = useState("");
   const [pass2, setPass2] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const inp = { background:"#18181F",border:"1px solid rgba(139,92,246,0.2)",color:"#fff" };
+
+  const handleNext = async () => {
+    setError("");
+    if (step === 1) {
+      if (!name.trim()) { setError("Введите имя"); return; }
+      if (!username.trim() || username.trim().length < 3) { setError("Имя пользователя минимум 3 символа"); return; }
+      setStep(2);
+    } else if (step === 2) {
+      setStep(3);
+    } else {
+      if (!pass || pass.length < 6) { setError("Пароль минимум 6 символов"); return; }
+      if (pass !== pass2) { setError("Пароли не совпадают"); return; }
+      setLoading(true);
+      const res = await authApi("register", { name: name.trim(), username: username.trim(), phone: phone.trim(), password: pass });
+      setLoading(false);
+      if (res.error) { setError(res.error); return; }
+      localStorage.setItem("arku_token", res.token);
+      onDone(res.user, res.token);
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 relative overflow-hidden" style={{ background:"#0A0A0F" }}>
@@ -184,15 +240,16 @@ function RegisterScreen({ onBack, onDone }: { onBack: () => void; onDone: () => 
           {step===3&&<>
             <div>
               <label className="text-xs font-medium mb-1.5 block" style={{ color:"#9CA3AF" }}>Пароль</label>
-              <input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="Минимум 8 символов" className="w-full px-4 py-3 rounded-xl outline-none font-golos" style={inp} />
+              <input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="Минимум 6 символов" className="w-full px-4 py-3 rounded-xl outline-none font-golos" style={inp} />
             </div>
             <div>
               <label className="text-xs font-medium mb-1.5 block" style={{ color:"#9CA3AF" }}>Повторите пароль</label>
-              <input type="password" value={pass2} onChange={e=>setPass2(e.target.value)} placeholder="Повторите пароль" className="w-full px-4 py-3 rounded-xl outline-none font-golos" style={inp} />
+              <input type="password" value={pass2} onChange={e=>setPass2(e.target.value)} placeholder="Повторите пароль" className="w-full px-4 py-3 rounded-xl outline-none font-golos" style={inp} onKeyDown={e=>e.key==="Enter"&&handleNext()} />
             </div>
           </>}
-          <button onClick={()=>step<3?setStep(step+1):onDone()} className="w-full py-3.5 rounded-xl font-montserrat font-bold text-white text-sm transition-all hover:scale-[1.02]" style={{ background:"linear-gradient(135deg,#7C3AED,#D946EF)",boxShadow:"0 0 20px rgba(124,58,237,0.4)" }}>
-            {step<3?"Продолжить":"Создать аккаунт"}
+          {error && <p className="text-xs rounded-lg px-3 py-2" style={{ background:"rgba(239,68,68,0.1)",color:"#F87171",border:"1px solid rgba(239,68,68,0.2)" }}>{error}</p>}
+          <button onClick={handleNext} disabled={loading} className="w-full py-3.5 rounded-xl font-montserrat font-bold text-white text-sm transition-all hover:scale-[1.02] disabled:opacity-60" style={{ background:"linear-gradient(135deg,#7C3AED,#D946EF)",boxShadow:"0 0 20px rgba(124,58,237,0.4)" }}>
+            {loading ? "Создаём аккаунт..." : step<3 ? "Продолжить" : "Создать аккаунт"}
           </button>
         </div>
         <p className="text-center text-xs mt-6 flex items-center justify-center gap-1.5" style={{ color:"#374151" }}>
@@ -405,7 +462,19 @@ function SearchScreen() {
   );
 }
 
-function ProfileScreen({ onLogout }: { onLogout: () => void }) {
+function ProfileScreen({ user, onLogout }: { user: User | null; onLogout: () => void }) {
+  const letter = user ? user.name.charAt(0).toUpperCase() : "Я";
+  const regDate = user?.created_at
+    ? new Date(user.created_at).toLocaleDateString("ru", { month: "long", year: "numeric" })
+    : "—";
+
+  const handleLogout = async () => {
+    const token = localStorage.getItem("arku_token");
+    if (token) await authApi("logout", { token });
+    localStorage.removeItem("arku_token");
+    onLogout();
+  };
+
   return (
     <div className="flex flex-col h-full overflow-y-auto pb-24" style={{ background:"#0A0A0F" }}>
       <div className="relative h-44 flex-shrink-0" style={{ background:"linear-gradient(135deg,#7C3AED 0%,#D946EF 50%,#06B6D4 100%)" }}>
@@ -413,19 +482,18 @@ function ProfileScreen({ onLogout }: { onLogout: () => void }) {
         <div className="absolute bottom-0 left-0 right-0 h-20" style={{ background:"linear-gradient(to bottom,transparent,#0A0A0F)" }} />
       </div>
       <div className="flex items-end gap-4 px-5 -mt-12 mb-5 relative z-10">
-        <div className="w-24 h-24 flex items-center justify-center rounded-3xl font-montserrat font-black text-white text-4xl animate-pulse-glow" style={{ background:"linear-gradient(135deg,#7C3AED,#D946EF)",border:"3px solid #0A0A0F",boxShadow:"0 0 30px rgba(124,58,237,0.5)" }}>Я</div>
+        <div className="w-24 h-24 flex items-center justify-center rounded-3xl font-montserrat font-black text-white text-4xl animate-pulse-glow" style={{ background:`linear-gradient(135deg,${user?.avatar_color || "#7C3AED"},${user?.avatar_color || "#D946EF"})`,border:"3px solid #0A0A0F",boxShadow:"0 0 30px rgba(124,58,237,0.5)" }}>{letter}</div>
         <div className="mb-2 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="font-montserrat font-black text-xl text-white">Вы</h2>
-            <span className="px-2 py-0.5 rounded-full text-xs font-montserrat font-bold" style={{ background:"linear-gradient(135deg,#7C3AED,#D946EF)",color:"#fff" }}>Premium</span>
+            <h2 className="font-montserrat font-black text-xl text-white">{user?.name || "Пользователь"}</h2>
           </div>
-          <p className="text-sm" style={{ color:"#8B5CF6" }}>@username</p>
+          <p className="text-sm" style={{ color:"#8B5CF6" }}>@{user?.username || "username"}</p>
         </div>
         <button className="mb-2 px-4 py-2 rounded-xl text-sm font-golos font-semibold" style={{ background:"rgba(139,92,246,0.15)",border:"1px solid rgba(139,92,246,0.3)",color:"#A78BFA" }}>Изменить</button>
       </div>
 
       <div className="grid grid-cols-3 gap-3 px-5 mb-6">
-        {[{val:"247",label:"Контактов"},{val:"1.2K",label:"Сообщений"},{val:"12",label:"Групп"}].map(s=>(
+        {[{val:"0",label:"Контактов"},{val:"0",label:"Сообщений"},{val:"0",label:"Групп"}].map(s=>(
           <div key={s.label} className="text-center py-4 rounded-2xl" style={{ background:"#111118",border:"1px solid rgba(139,92,246,0.15)" }}>
             <p className="font-montserrat font-black text-xl gradient-text">{s.val}</p>
             <p className="text-xs mt-0.5" style={{ color:"#6B7280" }}>{s.label}</p>
@@ -434,8 +502,12 @@ function ProfileScreen({ onLogout }: { onLogout: () => void }) {
       </div>
 
       <div className="px-5 space-y-3 mb-6">
-        {[{icon:"Phone",val:"+7 (900) 123-45-67"},{icon:"Mail",val:"user@arkumesenger.ru"},{icon:"Calendar",val:"Регистрация: март 2026"}].map(item=>(
-          <div key={item.val} className="flex items-center gap-3 px-4 py-3.5 rounded-2xl" style={{ background:"#111118",border:"1px solid rgba(139,92,246,0.1)" }}>
+        {[
+          { icon:"Phone", val: user?.phone || "Телефон не указан" },
+          { icon:"AtSign", val: `@${user?.username || "username"}` },
+          { icon:"Calendar", val: `Регистрация: ${regDate}` },
+        ].map(item=>(
+          <div key={item.icon} className="flex items-center gap-3 px-4 py-3.5 rounded-2xl" style={{ background:"#111118",border:"1px solid rgba(139,92,246,0.1)" }}>
             <div className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background:"rgba(139,92,246,0.15)" }}>
               <Icon name={item.icon} size={17} style={{ color:"#A78BFA" }} />
             </div>
@@ -445,7 +517,7 @@ function ProfileScreen({ onLogout }: { onLogout: () => void }) {
       </div>
 
       <div className="px-5">
-        <button onClick={onLogout} className="w-full py-3.5 rounded-xl font-montserrat font-semibold text-sm transition-all hover:scale-[1.01]" style={{ background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.25)",color:"#F87171" }}>
+        <button onClick={handleLogout} className="w-full py-3.5 rounded-xl font-montserrat font-semibold text-sm transition-all hover:scale-[1.01]" style={{ background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.25)",color:"#F87171" }}>
           Выйти из аккаунта
         </button>
       </div>
@@ -520,6 +592,23 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("login");
   const [activeTab, setActiveTab] = useState<Screen>("chats");
   const [openChat, setOpenChat] = useState<Chat | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem("arku_token");
+    if (!token) { setCheckingSession(false); return; }
+    authApi("me", { token }).then(res => {
+      if (res.user) {
+        setCurrentUser(res.user);
+        setScreen("chats");
+        setActiveTab("chats");
+      } else {
+        localStorage.removeItem("arku_token");
+      }
+      setCheckingSession(false);
+    }).catch(() => setCheckingSession(false));
+  }, []);
 
   const handleTabChange = (s: Screen) => {
     setActiveTab(s);
@@ -532,17 +621,33 @@ export default function App() {
     setScreen("chat");
   };
 
-  const handleLogin = () => {
+  const handleLogin = (user: User, _token: string) => {
+    setCurrentUser(user);
     setScreen("chats");
     setActiveTab("chats");
   };
 
   const handleLogout = () => {
+    setCurrentUser(null);
     setScreen("login");
     setOpenChat(null);
   };
 
   const showNav = !["login","register","chat"].includes(screen);
+
+  if (checkingSession) {
+    return (
+      <div className="h-screen flex items-center justify-center" style={{ background:"#0A0A0F" }}>
+        <BgOrbs />
+        <div className="flex flex-col items-center gap-4 z-10">
+          <div className="w-16 h-16 flex items-center justify-center rounded-2xl animate-pulse-glow" style={{ background:"linear-gradient(135deg,#7C3AED,#D946EF,#06B6D4)" }}>
+            <span className="font-montserrat font-black text-white text-2xl">A</span>
+          </div>
+          <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor:"#8B5CF6",borderTopColor:"transparent" }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen overflow-hidden font-golos" style={{ background:"#0A0A0F" }}>
@@ -557,7 +662,7 @@ export default function App() {
               {screen==="chat"&&openChat&&<ChatScreen chat={openChat} onBack={()=>{setScreen("chats");setOpenChat(null);}} />}
               {screen==="contacts"&&<ContactsScreen onChatStart={c=>handleChatOpen({id:c.id,name:c.name,avatar:c.avatar,lastMsg:"",time:"",unread:0,online:c.online,color:c.color})} />}
               {screen==="search"&&<SearchScreen />}
-              {screen==="profile"&&<ProfileScreen onLogout={handleLogout} />}
+              {screen==="profile"&&<ProfileScreen user={currentUser} onLogout={handleLogout} />}
               {screen==="settings"&&<SettingsScreen />}
             </div>
             {showNav&&<BottomNav active={activeTab} onChange={handleTabChange} />}
